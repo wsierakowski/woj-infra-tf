@@ -7,7 +7,7 @@ resource "aws_s3_bucket" "my_s3_bucket" {
   acl    = "private"
 
   versioning {
-    enabled = true
+    enabled = false
   }
 
   tags = {
