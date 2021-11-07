@@ -1,32 +1,116 @@
 provider "aws" {
-  region = "eu-west-2"
+  region = "eu-central-1"
 }
 
 data "aws_caller_identity" "my_account" {}
 
-resource "aws_s3_bucket" "my_s3_bucket" {
-  for_each = var.bucket_list
+resource "aws_vpc" "sigman_vpc" {
+  cidr_block = "10.0.0.0/16"
 
-  bucket = "${each.key}-${data.aws_caller_identity.my_account.account_id}"
-  acl    = "private"
+  tags = {
+    Name = "sigmanVPC"
+  }
+}
 
-  versioning {
-    enabled = each.value.versioning
+###################
+# Public Subnets
+###################
+
+resource "aws_subnet" "sigman_public_1" {
+  cidr_block = "10.0.1.0/24"
+  vpc_id = aws_vpc.sigman_vpc.id
+  availability_zone = "eu-central-1a"
+
+  tags = {
+    Name = "sigmanPublic1"
+  }
+}
+
+resource "aws_subnet" "sigman_public_2" {
+  cidr_block = "10.0.2.0/24"
+  vpc_id = aws_vpc.sigman_vpc.id
+  availability_zone = "eu-central-1b"
+
+  tags = {
+    Name = "sigmanPublic2"
+  }
+}
+
+resource "aws_internet_gateway" "sigman_igw" {
+  vpc_id = aws_vpc.sigman_vpc.id
+
+  tags = {
+    Name = "sigmanIGW"
+  }
+}
+
+resource "aws_route_table" "sigman_public_rt" {
+  vpc_id = aws_vpc.sigman_vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.sigman_igw.id
   }
 
   tags = {
-    Terraform : "true"
-    CostCenter : var.cost_center
-    AliasName: each.value.aliasName
+    Name = "sigmanPublicRT"
   }
 }
 
-output "first_bucket_name" {
-  description = "First bucket name"
-  value = aws_s3_bucket.my_s3_bucket["bucket1"].id
+resource "aws_route_table_association" "sigman_vpc_to_public_1" {
+  route_table_id = aws_route_table.sigman_public_rt.id
+  subnet_id = aws_subnet.sigman_public_1.id
 }
 
-output "all_bucket_name" {
-  description = "All bucket names"
-  value = values(aws_s3_bucket.my_s3_bucket).*.id
+resource "aws_route_table_association" "sigman_vpc_to_public_2" {
+  route_table_id = aws_route_table.sigman_public_rt.id
+  subnet_id = aws_subnet.sigman_public_1.id
+}
+
+###################
+# Private Subnets
+###################
+
+resource "aws_subnet" "sigman_private_1" {
+  cidr_block = "10.0.3.0/24"
+  vpc_id = aws_vpc.sigman_vpc.id
+  availability_zone = "eu-central-1a"
+
+  tags = {
+    Name = "sigmanPrivate1"
+  }
+}
+
+resource "aws_subnet" "sigman_private_2" {
+  cidr_block = "10.0.4.0/24"
+  vpc_id = aws_vpc.sigman_vpc.id
+  availability_zone = "eu-central-1b"
+
+  tags = {
+    Name = "sigmanPrivate2"
+  }
+}
+
+resource "aws_route_table" "sigman_private_rt" {
+  vpc_id = aws_vpc.sigman_vpc.id
+
+//  route {
+//    cidr_block = "0.0.0.0/0"
+//    nat_gateway_id = ""
+//    gateway_id = aws_internet_gateway.sigman_igw.id
+//  }
+
+  tags = {
+    Name = "sigmanPrivateRT"
+  }
+}
+
+resource "aws_route_table_association" "sigman_vpc_to_private_1" {
+  route_table_id = aws_route_table.sigman_private_rt.id
+  subnet_id = aws_subnet.sigman_private_1.id
+}
+
+resource "aws_route_table_association" "sigman_vpc_to_private_2" {
+  route_table_id = aws_route_table.sigman_private_rt.id
+  subnet_id = aws_subnet.sigman_private_1.id
 }
