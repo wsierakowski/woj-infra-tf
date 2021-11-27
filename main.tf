@@ -138,78 +138,48 @@ resource "aws_security_group" "natAndBastionInstanceSG" {
   }
 }
 
-//# EC2 instance
-//resource "aws_instance" "natAndBastionInstance" {
-//  ami = "ami-08b9633fe44dfcba1"
-//  instance_type = "t3.nano"
-//  subnet_id = aws_subnet.sigman_public_1.id
-//  associate_public_ip_address = true
-//  key_name = aws_key_pair.sigman_key.id
-//
-//  vpc_security_group_ids = [
-//    aws_security_group.natAndBastionInstanceSG.id
-//  ]
-//
-//  depends_on = [aws_security_group.natAndBastionInstanceSG]
-//
-//  tags = {
-//    Name = "NATandBastion"
-//  }
-//}
-
 # EC2 instance
-resource "aws_spot_instance_request" "natAndBastionInstance" {
+resource "aws_instance" "natAndBastionInstance" {
   ami = "ami-08b9633fe44dfcba1"
   instance_type = "t3.nano"
   subnet_id = aws_subnet.sigman_public_1.id
   associate_public_ip_address = true
   key_name = aws_key_pair.sigman_key.key_name
 
-  spot_price = "0.006"
-  spot_type = "one-time"
-  # Terraform will wait for the Spot Request to be fulfilled, and will throw
-  # an error if the timeout of 10m is reached.
-  wait_for_fulfillment = true
-
   vpc_security_group_ids = [
     aws_security_group.natAndBastionInstanceSG.id
   ]
   depends_on = [aws_security_group.natAndBastionInstanceSG]
 
-  # 1. User-data script to enable NAT capabilities
+  # User-data script to enable NAT capabilities
   #    wrapped into cloud-config to allow running on every instance run
   #    rather than just the initial launch
-  # 2. TF doesn't support setting source_dest_check on spot instances
-  #    https://github.com/hashicorp/terraform-provider-aws/issues/2751
-  #    Workaround: https://github.com/pulumi/pulumi-aws/issues/959
+
   user_data = <<EOF
-    Content-Type: multipart/mixed; boundary="//"
-    MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="//"
+MIME-Version: 1.0
 
-    --//
-    Content-Type: text/cloud-config; charset="us-ascii"
-    MIME-Version: 1.0
-    Content-Transfer-Encoding: 7bit
-    Content-Disposition: attachment; filename="cloud-config.txt"
+--//
+Content-Type: text/cloud-config; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="cloud-config.txt"
 
-    #cloud-config
-    cloud_final_modules:
-    - [scripts-user, always]
+#cloud-config
+cloud_final_modules:
+- [scripts-user, always]
 
-    --//
-    Content-Type: text/x-shellscript; charset="us-ascii"
-    MIME-Version: 1.0
-    Content-Transfer-Encoding: 7bit
-    Content-Disposition: attachment; filename="userdata.txt"
+--//
+Content-Type: text/x-shellscript; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="userdata.txt"
 
-    #!/bin/bash -xe
-    exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
-      sysctl -w net.ipv4.ip_forward=1
-      /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-    REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F'"' '/"region"/ { print $4 }')
-    INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-    aws --region $REGION ec2 modify-instance-attribute --instance-id "$INSTANCE_ID" --no-source-dest-check
-    --//--
+#!/bin/bash -xe
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+  sysctl -w net.ipv4.ip_forward=1
+  /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+--//--
   EOF
 
   # Required for NAT
@@ -218,23 +188,94 @@ resource "aws_spot_instance_request" "natAndBastionInstance" {
   tags = {
     Name = "NATandBastion"
   }
-
-  # Tags don't work on spot instance as per this ticket: https://github.com/hashicorp/terraform/issues/3263
-  # hence the workaround below (doesnt' work)
-  # when troubleshooting, look at this: https://github.com/int128/terraform-aws-nat-instance/blob/master/main.tf
-
-  # provisioner "local-exec" {
-  #  command = "aws ec2 create-tags --resources ${aws_spot_instance_request.natAndBastionInstance.spot_instance_id} --tags Key=Name,Value=ec2-resource-name"
-  #}
 }
 
 output natAndBastionInstancePubIp {
-  value = aws_spot_instance_request.natAndBastionInstance.public_ip
+  value = aws_instance.natAndBastionInstance.public_ip
 }
 
 output natAndBastionInstancePrivIp {
-  value = aws_spot_instance_request.natAndBastionInstance.private_ip
+  value = aws_instance.natAndBastionInstance.private_ip
 }
+
+## EC2 Spot instance
+#resource "aws_spot_instance_request" "natAndBastionInstance" {
+#  ami = "ami-08b9633fe44dfcba1"
+#  instance_type = "t3.nano"
+#  subnet_id = aws_subnet.sigman_public_1.id
+#  associate_public_ip_address = true
+#  key_name = aws_key_pair.sigman_key.key_name
+#
+#  spot_price = "0.006"
+#  spot_type = "one-time"
+#  # Terraform will wait for the Spot Request to be fulfilled, and will throw
+#  # an error if the timeout of 10m is reached.
+#  wait_for_fulfillment = true
+#
+#  vpc_security_group_ids = [
+#    aws_security_group.natAndBastionInstanceSG.id
+#  ]
+#  depends_on = [aws_security_group.natAndBastionInstanceSG]
+#
+#  # 1. User-data script to enable NAT capabilities
+#  #    wrapped into cloud-config to allow running on every instance run
+#  #    rather than just the initial launch
+#  # 2. TF doesn't support setting source_dest_check on spot instances
+#  #    https://github.com/hashicorp/terraform-provider-aws/issues/2751
+#  #    Workaround: https://github.com/pulumi/pulumi-aws/issues/959
+#  user_data = <<EOF
+#    Content-Type: multipart/mixed; boundary="//"
+#    MIME-Version: 1.0
+#
+#    --//
+#    Content-Type: text/cloud-config; charset="us-ascii"
+#    MIME-Version: 1.0
+#    Content-Transfer-Encoding: 7bit
+#    Content-Disposition: attachment; filename="cloud-config.txt"
+#
+#    #cloud-config
+#    cloud_final_modules:
+#    - [scripts-user, always]
+#
+#    --//
+#    Content-Type: text/x-shellscript; charset="us-ascii"
+#    MIME-Version: 1.0
+#    Content-Transfer-Encoding: 7bit
+#    Content-Disposition: attachment; filename="userdata.txt"
+#
+#    #!/bin/bash -xe
+#    exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+#      sysctl -w net.ipv4.ip_forward=1
+#      /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+#    REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F'"' '/"region"/ { print $4 }')
+#    INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+#    aws --region $REGION ec2 modify-instance-attribute --instance-id "$INSTANCE_ID" --no-source-dest-check
+#    --//--
+#  EOF
+#
+#  # Required for NAT
+#  source_dest_check = false
+#
+#  tags = {
+#    Name = "NATandBastion"
+#  }
+#
+#  # Tags don't work on spot instance as per this ticket: https://github.com/hashicorp/terraform/issues/3263
+#  # hence the workaround below (doesnt' work)
+#  # when troubleshooting, look at this: https://github.com/int128/terraform-aws-nat-instance/blob/master/main.tf
+#
+#  # provisioner "local-exec" {
+#  #  command = "aws ec2 create-tags --resources ${aws_spot_instance_request.natAndBastionInstance.spot_instance_id} --tags Key=Name,Value=ec2-resource-name"
+#  #}
+#}
+#
+#output natAndBastionInstancePubIp {
+#  value = aws_spot_instance_request.natAndBastionInstance.public_ip
+#}
+#
+#output natAndBastionInstancePrivIp {
+#  value = aws_spot_instance_request.natAndBastionInstance.private_ip
+#}
 
 ###################
 # Private Subnets
@@ -261,7 +302,7 @@ resource "aws_subnet" "sigman_private_2" {
 }
 
 resource "aws_route_table" "sigman_private_rt" {
-  depends_on = [aws_spot_instance_request.natAndBastionInstance]
+#  depends_on = [aws_spot_instance_request.natAndBastionInstance]
 
   vpc_id = aws_vpc.sigman_vpc.id
 
@@ -269,7 +310,7 @@ resource "aws_route_table" "sigman_private_rt" {
     cidr_block = "0.0.0.0/0"
     # nat_gateway_id = ""
     # gateway_id = aws_internet_gateway.sigman_igw.id
-    instance_id = aws_spot_instance_request.natAndBastionInstance.id
+    instance_id = aws_instance.natAndBastionInstance.id
   }
 
   tags = {
@@ -319,7 +360,9 @@ resource "aws_security_group" "privateInstanceSG" {
     from_port        = 0
     to_port          = 0
     protocol         = "-1"
-    cidr_blocks      = ["10.0.0.0/16"]
+    # Can't reach NAT Instance with this setting for some reason
+#    cidr_blocks      = ["10.0.0.0/16"]
+    cidr_blocks      = ["0.0.0.0/0"]
   }
 
   lifecycle {
