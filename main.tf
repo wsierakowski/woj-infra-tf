@@ -329,7 +329,7 @@ resource "aws_route_table_association" "rta_private_2" {
 }
 
 ###################
-# Private Subnet Instance
+# Private Subnet Instance (temporarily until ASG is created)
 ###################
 
 # SG
@@ -412,6 +412,55 @@ resource "aws_spot_instance_request" "privateSpotInstance" {
 
 output privateInstanceIp {
   value = aws_spot_instance_request.privateSpotInstance.private_ip
+}
+
+###################
+# Private Subnet ASG
+###################
+
+data "template_file" "launch_template_userdata" {
+  template = <<EOF
+#!/bin/bash
+git clone https://github.com/wsierakowski/demo-njs-app.git
+cd demo-njs-app
+npm i
+npm start
+  EOF
+}
+
+resource "aws_launch_template" "demo-njs-app" {
+
+  name = "demo-njs-app"
+  image_id = "ami-077f7be394e6e7874"
+  instance_type = "t3.micro"
+  key_name = aws_key_pair.sigman_key.key_name
+
+#  iam_instance_profile {
+#    name = "test"
+#  }
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+
+    ebs {
+      volume_size = 8
+      volume_type = "gp2"
+      delete_on_termination = true
+    }
+  }
+
+  vpc_security_group_ids = [aws_security_group.privateInstanceSG.id]
+
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Name = "test"
+    }
+  }
+
+  # https://github.com/hashicorp/terraform-provider-aws/issues/5530
+  user_data = base64encode(data.template_file.launch_template_userdata.rendered)
 }
 
 /*
