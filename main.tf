@@ -418,7 +418,7 @@ output privateInstanceIp {
 # Private Subnet ASG
 ###################
 
-data "template_file" "launch_template_userdata" {
+data "template_file" "demo-njs-app_userdata" {
   template = <<EOF
 #!/bin/bash
 git clone https://github.com/wsierakowski/demo-njs-app.git
@@ -428,9 +428,10 @@ npm start
   EOF
 }
 
-resource "aws_launch_template" "demo-njs-app" {
+resource "aws_launch_template" "demo-njs-app-lt" {
 
-  name = "demo-njs-app"
+  name = "demo-njs-app-lt"
+
   image_id = "ami-077f7be394e6e7874"
   instance_type = "t3.micro"
   key_name = aws_key_pair.sigman_key.key_name
@@ -460,8 +461,65 @@ resource "aws_launch_template" "demo-njs-app" {
   }
 
   # https://github.com/hashicorp/terraform-provider-aws/issues/5530
-  user_data = base64encode(data.template_file.launch_template_userdata.rendered)
+  user_data = base64encode(data.template_file.demo-njs-app_userdata.rendered)
 }
+
+resource "aws_autoscaling_group" "demo-njs-app-asg" {
+  name = "demo-njs-app-asg"
+#  availability_zones = ["eu-central-1a", "eu-central-1b"]
+  vpc_zone_identifier = [aws_subnet.sigman_private_1.id, aws_subnet.sigman_private_2.id]
+  desired_capacity = 0
+  min_size = 0
+  max_size = 3
+
+  launch_template {
+    id = aws_launch_template.demo-njs-app-lt.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "DemoNjsAppASGInstance"
+    propagate_at_launch = true
+  }
+}
+
+resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy" {
+  name                   = "demo-njs-app-asg-scaling-policy"
+  adjustment_type        = "ChangeInCapacity"
+  autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.name
+  policy_type = "StepScaling"
+
+  step_adjustment {
+    scaling_adjustment          = 1
+    metric_interval_lower_bound = 50
+    metric_interval_upper_bound = 60
+  }
+
+  step_adjustment {
+    scaling_adjustment          = 1
+    metric_interval_lower_bound = 60
+    metric_interval_upper_bound = 70
+  }
+
+  step_adjustment {
+    scaling_adjustment          = 1
+    metric_interval_lower_bound = 70
+  }
+}
+
+# TODO: missing alarm - look at DemoNjsAppOver50
+# hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
+# also: https://hands-on.cloud/terraform-recipe-managing-auto-scaling-groups-and-load-balancers/
+
+
+#resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy" {
+#  name                   = "demo-njs-app-asg-scaling-policy"
+#  scaling_adjustment     = 4
+#  adjustment_type        = "ChangeInCapacity"
+#  cooldown               = 300
+#  autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.name
+#}
 
 /*
 TODOs:
