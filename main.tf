@@ -472,6 +472,11 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
   min_size = 0
   max_size = 3
 
+  # Required to redeploy without an outage.
+  lifecycle {
+    create_before_destroy = true
+  }
+
   launch_template {
     id = aws_launch_template.demo-njs-app-lt.id
     version = "$Latest"
@@ -490,27 +495,48 @@ resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy" {
   autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.name
   policy_type = "StepScaling"
 
+  # TODO: those bounds values are addedd to the alarm's threshold value?
+
   step_adjustment {
     scaling_adjustment          = 1
-    metric_interval_lower_bound = 50
-    metric_interval_upper_bound = 60
+    metric_interval_lower_bound = 1.0
+    metric_interval_upper_bound = 2.0
   }
 
   step_adjustment {
     scaling_adjustment          = 1
-    metric_interval_lower_bound = 60
-    metric_interval_upper_bound = 70
+    metric_interval_lower_bound = 2.0
+    metric_interval_upper_bound = 3.0
   }
 
   step_adjustment {
     scaling_adjustment          = 1
-    metric_interval_lower_bound = 70
+    metric_interval_lower_bound = 3.0
   }
+}
+
+resource "aws_cloudwatch_metric_alarm" "demo-njs-app-cpu-alarm" {
+  alarm_name          = "demo-njs-app-cpu-over70-alarm"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  metric_name = "CPUUtilization"
+  namespace = "AWS/EC2"
+  period = 120
+  statistic = "Average"
+  threshold = 70
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.demo-njs-app-asg.name
+  }
+
+  alarm_description = "This metric monitors EC2 CPU utilization"
+  alarm_actions = [aws_autoscaling_policy.demo-njs-app-asg-scaling-policy.arn]
 }
 
 # TODO: missing alarm - look at DemoNjsAppOver50
 # hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
 # also: https://hands-on.cloud/terraform-recipe-managing-auto-scaling-groups-and-load-balancers/
+# https://cloud.netapp.com/blog/blg-cloudwatch-monitoring-how-it-works-and-key-metrics-to-watch
 
 
 #resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy" {
