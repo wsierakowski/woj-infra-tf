@@ -456,7 +456,8 @@ resource "aws_launch_template" "demo-njs-app-lt" {
     resource_type = "instance"
 
     tags = {
-      Name = "test"
+      Name = "test-bla-bla"
+      Name2 = "test-bla-bla"
     }
   }
 
@@ -489,48 +490,77 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
   }
 }
 
-resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy" {
-  name                   = "demo-njs-app-asg-scaling-policy"
-  adjustment_type        = "ChangeInCapacity"
+#Metric value
+#
+#-infinity          30%    40%          60%     70%             infinity
+#-----------------------------------------------------------------------
+#          -30%      | -10% | Unchanged  | +10%  |       +30%
+#-----------------------------------------------------------------------
+# Need to be two separate policies, one for scaling up and other down:
+#   https://github.com/hashicorp/terraform-provider-aws/issues/10376
+
+resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy-down" {
+  name                   = "demo-njs-app-asg-scaling-policy-down"
+  adjustment_type        = "PercentChangeInCapacity"
   autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.name
   policy_type = "StepScaling"
 
-  # TODO: those bounds values are addedd to the alarm's threshold value?
+  # Those bounds values are added to the alarm's threshold value
 
   step_adjustment {
-    scaling_adjustment          = 1
-    metric_interval_lower_bound = 1.0
-    metric_interval_upper_bound = 2.0
+    scaling_adjustment          = -30
+    metric_interval_upper_bound = -20
   }
 
   step_adjustment {
-    scaling_adjustment          = 1
-    metric_interval_lower_bound = 2.0
-    metric_interval_upper_bound = 3.0
+    scaling_adjustment          = -10
+    metric_interval_lower_bound = -20
+    metric_interval_upper_bound = -10
+  }
+}
+
+resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy-up" {
+  name                   = "demo-njs-app-asg-scaling-policy-up"
+  adjustment_type        = "PercentChangeInCapacity"
+  autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.name
+  policy_type = "StepScaling"
+
+  # Those bounds values are added to the alarm's threshold value
+
+#  step_adjustment {
+#    scaling_adjustment          = 0
+#    metric_interval_lower_bound = -10
+#    metric_interval_upper_bound = 10
+#  }
+
+  step_adjustment {
+    scaling_adjustment          = 10
+    metric_interval_lower_bound = 10
+    metric_interval_upper_bound = 20
   }
 
   step_adjustment {
-    scaling_adjustment          = 1
-    metric_interval_lower_bound = 3.0
+    scaling_adjustment          = 30
+    metric_interval_lower_bound = 20
   }
 }
 
 resource "aws_cloudwatch_metric_alarm" "demo-njs-app-cpu-alarm" {
-  alarm_name          = "demo-njs-app-cpu-over70-alarm"
+  alarm_name          = "demo-njs-app-cpu-over50-alarm"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 2
   metric_name = "CPUUtilization"
   namespace = "AWS/EC2"
-  period = 120
+  period = 60
   statistic = "Average"
-  threshold = 70
+  threshold = 50
 
   dimensions = {
     AutoScalingGroupName = aws_autoscaling_group.demo-njs-app-asg.name
   }
 
   alarm_description = "This metric monitors EC2 CPU utilization"
-  alarm_actions = [aws_autoscaling_policy.demo-njs-app-asg-scaling-policy.arn]
+  alarm_actions = [aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-down.arn, aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-up.arn]
 }
 
 # TODO: missing alarm - look at DemoNjsAppOver50
