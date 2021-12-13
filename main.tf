@@ -355,6 +355,15 @@ resource "aws_security_group" "privateInstanceSG" {
       "10.0.0.0/16"]
   }
 
+  # 3000 only from VPC for nodejs web app port
+  ingress {
+    from_port = 3000
+    protocol = "tcp"
+    to_port = 3000
+    cidr_blocks = [
+      "10.0.0.0/16"]
+  }
+
   # Allow all traffic out
   egress {
     from_port        = 0
@@ -469,7 +478,7 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
   name = "demo-njs-app-asg"
 #  availability_zones = ["eu-central-1a", "eu-central-1b"]
   vpc_zone_identifier = [aws_subnet.sigman_private_1.id, aws_subnet.sigman_private_2.id]
-  desired_capacity = 0
+  desired_capacity = 1
   min_size = 0
   max_size = 3
 
@@ -488,6 +497,18 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
     value               = "DemoNjsAppASGInstance"
     propagate_at_launch = true
   }
+}
+
+# https://github.com/hashicorp/terraform-provider-aws/issues/511#issuecomment-624779778
+data "aws_instances" "asg_instances_meta" {
+  instance_tags = {
+    # Use whatever name you have given to your instances
+    Name = "DemoNjsAppASGInstance"
+  }
+}
+
+output "asg_private_ips" {
+  value = data.aws_instances.asg_instances_meta.private_ips
 }
 
 #Metric value
@@ -563,6 +584,26 @@ resource "aws_cloudwatch_metric_alarm" "demo-njs-app-cpu-alarm" {
   alarm_actions = [aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-down.arn, aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-up.arn]
 }
 
+resource "aws_lb_target_group" "demo-njs-app-tg" {
+  name = "demo-njs-app-tg"
+  port = 3000
+  protocol = "HTTP"
+  vpc_id = aws_vpc.sigman_vpc.id
+
+  health_check {
+    path = "/health"
+    port = "traffic-port"
+    # 5 consecutive health check successes
+    healthy_threshold = 5
+    # 2 consecutive health check failures
+    unhealthy_threshold = 2
+    timeout = 5
+    interval = 30
+    # Success codes
+    matcher = "200"
+  }
+}
+
 # TODO: missing alarm - look at DemoNjsAppOver50
 # hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
 # also: https://hands-on.cloud/terraform-recipe-managing-auto-scaling-groups-and-load-balancers/
@@ -579,7 +620,7 @@ resource "aws_cloudwatch_metric_alarm" "demo-njs-app-cpu-alarm" {
 
 /*
 TODOs:
-- add NATs
+- add NLB
 - add ALB
 - add ASG running from spot instances form launch template in priv subnet
 
