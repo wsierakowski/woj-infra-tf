@@ -311,6 +311,8 @@ resource "aws_route_table" "sigman_private_rt" {
     # nat_gateway_id = ""
     # gateway_id = aws_internet_gateway.sigman_igw.id
     instance_id = aws_instance.natAndBastionInstance.id
+    # without this, plan reapply will show a change due to this populated
+    network_interface_id = aws_instance.natAndBastionInstance.primary_network_interface_id
   }
 
   tags = {
@@ -441,6 +443,7 @@ resource "aws_launch_template" "demo-njs-app-lt" {
 
   name = "demo-njs-app-lt"
 
+  // TODO, this should have been searched and found in case the AMI is copied to other regions
   image_id = "ami-077f7be394e6e7874"
   instance_type = "t3.micro"
   key_name = aws_key_pair.sigman_key.key_name
@@ -485,6 +488,9 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
   # Required to redeploy without an outage.
   lifecycle {
     create_before_destroy = true
+    # As per the note here https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/autoscaling_attachment
+    # and discussion here: https://github.com/hashicorp/terraform-provider-aws/issues/14540#issuecomment-680099770
+    ignore_changes = [load_balancers, target_group_arns]
   }
 
   launch_template {
@@ -501,6 +507,9 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
 
 # https://github.com/hashicorp/terraform-provider-aws/issues/511#issuecomment-624779778
 data "aws_instances" "asg_instances_meta" {
+  # to avoid "Error: Your query returned no results. Please change your search criteria and try again."
+
+depends_on = [aws_autoscaling_group.demo-njs-app-asg]
   instance_tags = {
     # Use whatever name you have given to your instances
     Name = "DemoNjsAppASGInstance"
@@ -508,6 +517,7 @@ data "aws_instances" "asg_instances_meta" {
 }
 
 output "asg_private_ips" {
+  description = "Private IPs of ASG instances"
   value = data.aws_instances.asg_instances_meta.private_ips
 }
 
@@ -584,6 +594,48 @@ resource "aws_cloudwatch_metric_alarm" "demo-njs-app-cpu-alarm" {
   alarm_actions = [aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-down.arn, aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-up.arn]
 }
 
+###################
+# ALB
+###################
+
+# SG
+resource "aws_security_group" "demo-njs-app-alb-sg" {
+  name = "demo-njs-app-alb-sg"
+  description = "SG for private instance"
+  vpc_id = aws_vpc.sigman_vpc.id
+
+  ingress {
+    from_port = 443
+    protocol = "tcp"
+    to_port = 443
+    cidr_blocks = [
+      "0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port = 80
+    protocol = "tcp"
+    to_port = 80
+    cidr_blocks = [
+      "0.0.0.0/0"]
+  }
+
+  # TODO: what if there was no egress specified? Should we actually allow all, SG are stateful.
+  # Allow all traffic out
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    # Can't reach NAT Instance with this setting for some reason
+    #    cidr_blocks      = ["10.0.0.0/16"]
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+#  lifecycle {
+#    create_before_destroy = true
+#  }
+}
+
 resource "aws_lb_target_group" "demo-njs-app-tg" {
   name = "demo-njs-app-tg"
   port = 3000
@@ -604,6 +656,93 @@ resource "aws_lb_target_group" "demo-njs-app-tg" {
   }
 }
 
+resource "aws_lb" "demo-njs-app-alb" {
+  name = "demo-njs-app-alb"
+  internal = false
+  load_balancer_type = "application"
+  security_groups = [aws_security_group.demo-njs-app-alb-sg.id]
+  subnets = [aws_subnet.sigman_public_1.id, aws_subnet.sigman_public_2.id]
+
+#  enable_deletion_protection = true
+}
+
+output "alb_dns_name" {
+  description = "The DNS name of the load balancer."
+  value = aws_lb.demo-njs-app-alb.dns_name
+}
+
+## TODO: this is failing, but look at this: https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/autoscaling_attachment
+#resource "aws_lb_target_group_attachment" "demo-njs-app-alb-attachment" {
+#  target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
+#  target_id        = aws_lb.demo-njs-app-alb.arn
+#}
+# =====================
+resource "aws_autoscaling_attachment" "asg_attachment_test" {
+  autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.id
+  alb_target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
+}
+
+# =====================
+resource "aws_lb_listener" "demo-njs-app-alb-listener-http" {
+  load_balancer_arn = aws_lb.demo-njs-app-alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
+  }
+}
+
+# https://stackoverflow.com/questions/64310497/terraform-aws-and-importing-existing-ssl-certificates
+resource "aws_acm_certificate" "hahment-com-cert" {
+  private_key = file("~/Downloads/klucz_prywatny_.txt")
+  certificate_body = file("~/Downloads/certyfikat_.txt")
+  certificate_chain = file("~/Downloads/certyfikat_posredni_.txt")
+
+  tags = {
+    domain = "hahment.com"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_lb_listener" "demo-njs-app-alb-listener-https" {
+  load_balancer_arn = aws_lb.demo-njs-app-alb.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = aws_acm_certificate.hahment-com-cert.arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
+  }
+}
+
+###################
+# Route 53 hosted zone
+###################
+
+# TODO: look at this: https://github.com/hashicorp/terraform/issues/9289
+data "aws_route53_zone" "wojsierak" {
+  name         = "wojsierak.com."
+}
+
+resource "aws_route53_record" "www" {
+  zone_id = data.aws_route53_zone.wojsierak.zone_id
+#  name    = "dev.${data.aws_route53_zone.wojsierak.name}"
+  name    = data.aws_route53_zone.wojsierak.name
+  type    = "A"
+  alias {
+    name                   = aws_lb.demo-njs-app-alb.dns_name
+    zone_id                = aws_lb.demo-njs-app-alb.zone_id
+    evaluate_target_health = false
+  }
+}
+
 # TODO: missing alarm - look at DemoNjsAppOver50
 # hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
 # also: https://hands-on.cloud/terraform-recipe-managing-auto-scaling-groups-and-load-balancers/
@@ -620,9 +759,12 @@ resource "aws_lb_target_group" "demo-njs-app-tg" {
 
 /*
 TODOs:
+- why ASG gets recreated everytime I run it?
 - add NLB
-- add ALB
-- add ASG running from spot instances form launch template in priv subnet
+- add ASG running from spot instances from launch template in priv subnet
+- provide consistency for naming convention,
+- route53 (public and private hosted zone)
+- DB
 
 terraform state list
 */
