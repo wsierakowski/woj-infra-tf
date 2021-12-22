@@ -306,18 +306,27 @@ resource "aws_route_table" "sigman_private_rt" {
 
   vpc_id = aws_vpc.sigman_vpc.id
 
-  route {
-    cidr_block = "0.0.0.0/0"
-    # nat_gateway_id = ""
-    # gateway_id = aws_internet_gateway.sigman_igw.id
-    instance_id = aws_instance.natAndBastionInstance.id
-    # without this, plan reapply will show a change due to this populated
-    network_interface_id = aws_instance.natAndBastionInstance.primary_network_interface_id
-  }
+  # https://github.com/hashicorp/terraform-provider-aws/issues/1426
+#  route {
+#    cidr_block = "0.0.0.0/0"
+#    # nat_gateway_id = ""
+#    # gateway_id = aws_internet_gateway.sigman_igw.id
+##    instance_id = aws_instance.natAndBastionInstance.id
+#    # without this, plan reapply will show a change due to this populated
+#    network_interface_id = aws_instance.natAndBastionInstance.primary_network_interface_id
+#  }
 
   tags = {
     Name = "sigmanPrivateRT"
   }
+}
+
+# https://github.com/hashicorp/terraform-provider-aws/issues/1426
+# inline route in route table was always showing a change (instance id auto populated or net_int_id if instance_id was provided)
+resource "aws_route" "vpn" {
+  route_table_id = aws_route_table.sigman_private_rt.id
+  network_interface_id = aws_instance.natAndBastionInstance.primary_network_interface_id
+  destination_cidr_block = "0.0.0.0/0"
 }
 
 resource "aws_route_table_association" "rta_private_1" {
@@ -759,12 +768,13 @@ resource "aws_route53_record" "www" {
 
 /*
 TODOs:
-- why ASG gets recreated everytime I run it?
 - add NLB
 - add ASG running from spot instances from launch template in priv subnet
+  - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
 - provide consistency for naming convention,
 - route53 (public and private hosted zone)
 - DB
+- secrets manager
 
 terraform state list
 */
