@@ -773,6 +773,7 @@ TODOs:
   - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
 - provide consistency for naming convention,
 - route53 (public and private hosted zone)
+  - subdomain for bastion
 - DB
 - secrets manager
 
