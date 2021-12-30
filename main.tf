@@ -778,6 +778,8 @@ TODOs:
 - secrets manager
 - format spaces indent around equal sign
 - make bastion a spot instance
+- EC2 role with policy to access s3 and secret manager
+- update source code to look up correct secret
 
 terraform state list
 */

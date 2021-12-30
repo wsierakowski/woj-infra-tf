@@ -2,14 +2,22 @@
 # Read replica example: https://msameeduddin.medium.com/using-terraform-deploying-postgresql-instance-with-read-replica-in-aws-49e75012c0b3
 # https://github.com/terraform-aws-modules/terraform-aws-rds/blob/master/examples/complete-postgres/main.tf
 
+# Secrets manager:
+# - https://automateinfra.com/2021/03/24/how-to-create-secrets-in-aws-secrets-manager-using-terraform-in-amazon-account/
+# - https://stackoverflow.com/questions/65603923/terraform-rds-database-credentials
+# - role: https://qalead.medium.com/terraform-aws-secretmanager-reading-secret-from-an-ec2-instance-using-iam-role-policy-and-a7a2b6922165
+
 # It may take 5-7 minutes for AWS to provision the RDS instance.
 
 provider "random" {}
 
+#  Error: Error creating DB Instance: InvalidParameterValue: The parameter MasterUserPassword is not a valid password. Only printable ASCII characters besides '/', '@', '"', ' ' may be used.
 resource "random_password" "db_password" {
   length = 20
+  # Include special characters in the result
   special = true
-  override_special = "_%@"
+  # Supply your own list of special characters to use for string generation.
+  override_special = "/@\" "
 }
 
 resource "aws_db_subnet_group" "sigman_db_sg" {
@@ -31,8 +39,7 @@ resource "aws_security_group" "sigman_psql_sg" {
     from_port = 5432
     protocol = "tcp"
     to_port = 5432
-    # TODO: are they right SGs?
-    security_groups = [aws_security_group.demo-njs-app-alb-sg.id, aws_security_group.natAndBastionInstanceSG.id]
+    security_groups = [aws_security_group.privateInstanceSG.id, aws_security_group.natAndBastionInstanceSG.id]
 #    cidr_blocks = aws_vpc.sigman_vpc.cidr_block
     #    cidr_blocks = ["10.0.0.0/16"]
   }
@@ -53,7 +60,7 @@ resource "aws_security_group" "sigman_psql_sg" {
 }
 
 resource "aws_db_parameter_group" "sigman_db_pg" {
-  name   = "sigman_db_pg"
+  name   = "sigman-db-pg"
   family = "postgres13"
 
   parameter {
@@ -63,9 +70,9 @@ resource "aws_db_parameter_group" "sigman_db_pg" {
 }
 
 resource "aws_db_instance" "sigman_db" {
-  identifier = "sigman_db"
+  identifier = "sigman-db"
   # The name of the database to create when the DB instance is created
-  name = "sigman_db"
+  name = "demo_njs_app"
   instance_class = "db.t3.micro"
   allocated_storage = 5
   engine = "postgres"
@@ -78,14 +85,33 @@ resource "aws_db_instance" "sigman_db" {
   vpc_security_group_ids = [aws_security_group.sigman_psql_sg.id]
 
 #  parameter_group_name = "default.postgres13"
+  # TODO: does this actually work?
   parameter_group_name = aws_db_parameter_group.sigman_db_pg.name
   skip_final_snapshot = true
   multi_az = false
-  storage_encrypted    = false
+  storage_encrypted    = true
   publicly_accessible  = false
 
   # changes requiring instance reboot or degradation can be applied at maintenance window or can be applied immediately (causing outage)
   apply_immediately      = true
+}
+
+resource "aws_secretsmanager_secret" "sigman_psql_db" {
+  name = "sigman-psql-db"
+}
+
+resource "aws_secretsmanager_secret_version" "sigman_psql_db" {
+  secret_id = aws_secretsmanager_secret.sigman_psql_db.id
+  secret_string = <<EOF
+{
+  "username": "${aws_db_instance.sigman_db.username}",
+  "password: "${random_password.db_password.result}",
+  "engine": "postgres",
+  "host": "${aws_db_instance.sigman_db.endpoint}",
+  "port": "${aws_db_instance.sigman_db.port}",
+  "dbInstanceIdentifier": "${aws_db_instance.sigman_db.identifier}"
+}
+EOF
 }
 
 output "rds_hostname" {
@@ -109,6 +135,7 @@ output "rds_username" {
 output "rds_password" {
   description = "RDS instance root password"
   value = aws_db_instance.sigman_db.password
+  sensitive = true
 }
 
 # $ psql $(terraform output -raw rds_replica_connection_parameters)
@@ -125,6 +152,9 @@ output "rds_replica_connection_parameters" {
 # psql -h <hostname or ip address> -p <port number of remote machine> -d <database name which you want to connect> -U <username of the database server>
 
 # psql -h $(terraform output -raw rds_hostname) -p $(terraform output -raw rds_port) -U $(terraform output -raw rds_username) postgres
+
+# terraform output -raw rds_password
+
 # $ CREATE DATABASE hashicorp;
 # \l \list
 # \c demo_njs_app
@@ -133,3 +163,15 @@ output "rds_replica_connection_parameters" {
 
 
 # psql -h wsi-psql-db-fromreplica1.ck10rjmx409c.eu-west-2.rds.amazonaws.com -p 5432 -U postgres
+
+#  demo_njs_app=> select * from books
+#  demo_njs_app-> ;
+#  id |         title          |                     description
+#  ----+------------------------+------------------------------------------------------
+#  1 | Rework                 | A better, faster, easier way to succeed in business.
+#  2 | Deep Work              | Rules for Focused Success in a Distracted World.
+#  3 | Thinking Fast and Slow | Learn about your system 1 and system 2
+#  4 | Grzyb2                 | A book about stranger mushrooms
+#  5 | Grzyb3                 | A book about strangest mushrooms
+#  6 | Grzyb4                 | A book about strangest of the stranger mushrooms
+#  7 | Grzyb5                 | A book about strangest of the strangest mushrooms
