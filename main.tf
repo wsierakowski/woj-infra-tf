@@ -776,6 +776,8 @@ TODOs:
   - subdomain for bastion
 - DB
 - secrets manager
+- format spaces indent around equal sign
+- make bastion a spot instance
 
 terraform state list
 */

@@ -123,7 +123,7 @@ resource "aws_network_acl" "sigman_private_nacl" {
     to_port    = 0
     icmp_type = -1
     icmp_code = -1
-    cidr_block = "10.0.0.0/16"
+    cidr_block = aws_vpc.sigman_vpc.cidr_block #"10.0.0.0/16"
     action     = "allow"
   }
 
@@ -132,7 +132,7 @@ resource "aws_network_acl" "sigman_private_nacl" {
     protocol   = "tcp"
     from_port  = 22
     to_port    = 22
-    cidr_block = "10.0.0.0/16"
+    cidr_block = aws_vpc.sigman_vpc.cidr_block
     action     = "allow"
   }
 
@@ -141,7 +141,7 @@ resource "aws_network_acl" "sigman_private_nacl" {
     protocol   = "tcp"
     from_port  = 3000
     to_port    = 3000
-    cidr_block = "10.0.0.0/16"
+    cidr_block = aws_vpc.sigman_vpc.cidr_block
     action     = "allow"
   }
 
