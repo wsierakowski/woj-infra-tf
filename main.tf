@@ -774,8 +774,6 @@ TODOs:
 - provide consistency for naming convention,
 - route53 (public and private hosted zone)
   - subdomain for bastion
-- DB
-- secrets manager
 - format spaces indent around equal sign
 - make bastion a spot instance
 - EC2 role with policy to access s3 and secret manager
