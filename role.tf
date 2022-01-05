@@ -10,21 +10,22 @@ data "aws_iam_policy" "SecretsManagerReadWrite" {
 
 resource "aws_iam_role" "demo-njs-app-role" {
   name = "demo-njs-app-role"
-  assume_role_policy = <<EOF
-{
- "Version": "2012-10-17",
- "Statement": [
-   {
-     "Action": "sts:AssumeRole",
-     "Principal": {
-       "Service": "ec2.amazonaws.com"
-     },
-     "Effect": "Allow",
-     "Sid": ""
-   }
- ]
-}
-EOF
+  # indented heredoc string variant that is introduced by the <<-
+  assume_role_policy = <<-EOF
+  {
+   "Version": "2012-10-17",
+   "Statement": [
+     {
+       "Action": "sts:AssumeRole",
+       "Principal": {
+         "Service": "ec2.amazonaws.com"
+       },
+       "Effect": "Allow",
+       "Sid": ""
+     }
+   ]
+  }
+  EOF
 }
 
 resource "aws_iam_role_policy_attachment" "demo-njs-app-role-s3-policy-attach" {
@@ -39,5 +40,5 @@ resource "aws_iam_role_policy_attachment" "demo-njs-app-role-sm-policy-attach" {
 
 resource "aws_iam_instance_profile" "demo-njs-app-role" {
   name = "demo-njs-app-role"
-  roles = [aws_iam_role.demo-njs-app-role.name]
+  role = aws_iam_role.demo-njs-app-role.name
 }

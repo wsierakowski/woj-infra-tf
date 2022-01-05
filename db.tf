@@ -17,7 +17,9 @@ resource "random_password" "db_password" {
   # Include special characters in the result
   special = true
   # Supply your own list of special characters to use for string generation.
-  override_special = "/@\" "
+  # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/243
+  # this didn't work override_special = "/@\" "
+  override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
 resource "aws_db_subnet_group" "sigman_db_sg" {
@@ -96,22 +98,39 @@ resource "aws_db_instance" "sigman_db" {
   apply_immediately      = true
 }
 
-resource "aws_secretsmanager_secret" "sigman_psql_db" {
-  name = "sigman-psql-db"
+resource "aws_secretsmanager_secret" "demo_psql_db" {
+  name = "demo-psql-db"
+  # https://aws.amazon.com/premiumsupport/knowledge-center/delete-secrets-manager-secret/
+  # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret#recovery_window_in_days
+  recovery_window_in_days = 0
 }
 
-resource "aws_secretsmanager_secret_version" "sigman_psql_db" {
-  secret_id = aws_secretsmanager_secret.sigman_psql_db.id
-  secret_string = <<EOF
-{
-  "username": "${aws_db_instance.sigman_db.username}",
-  "password: "${random_password.db_password.result}",
-  "engine": "postgres",
-  "host": "${aws_db_instance.sigman_db.endpoint}",
-  "port": "${aws_db_instance.sigman_db.port}",
-  "dbInstanceIdentifier": "${aws_db_instance.sigman_db.identifier}"
+locals {
+  secret_credentials = {
+    username: aws_db_instance.sigman_db.username
+    password: random_password.db_password.result
+    engine: "postgres"
+    host: aws_db_instance.sigman_db.address
+    port: aws_db_instance.sigman_db.port
+    dbInstanceIdentifier: aws_db_instance.sigman_db.identifier
+  }
 }
-EOF
+
+resource "aws_secretsmanager_secret_version" "demo_psql_db" {
+  secret_id = aws_secretsmanager_secret.demo_psql_db.id
+  secret_string = jsonencode(local.secret_credentials)
+  # prefer jsonencode over heredoc to avoid typos
+  # indented heredoc string variant that is introduced by the <<-
+#  secret_string = <<-EOF
+#    {
+#      "username": "${aws_db_instance.sigman_db.username}",
+#      "password": "${random_password.db_password.result}",
+#      "engine": "postgres",
+#      "host": "${aws_db_instance.sigman_db.endpoint}",
+#      "port": "${aws_db_instance.sigman_db.port}",
+#      "dbInstanceIdentifier": "${aws_db_instance.sigman_db.identifier}"
+#    }
+#    EOF
 }
 
 output "rds_hostname" {
@@ -139,8 +158,8 @@ output "rds_password" {
 }
 
 # $ psql $(terraform output -raw rds_replica_connection_parameters)
-output "rds_replica_connection_parameters" {
-  description = "RDS replica instance connection parameters"
+output "rds_connection_parameters" {
+  description = "RDS instance connection parameters"
   value       = "-h ${aws_db_instance.sigman_db.address} -p ${aws_db_instance.sigman_db.port} -U ${aws_db_instance.sigman_db.username} postgres"
 }
 

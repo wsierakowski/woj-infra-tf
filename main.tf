@@ -152,8 +152,9 @@ resource "aws_instance" "natAndBastionInstance" {
   depends_on = [aws_security_group.natAndBastionInstanceSG]
 
   # User-data script to enable NAT capabilities
-  #    wrapped into cloud-config to allow running on every instance run
+  #    wrapped into cloud-config to allow running on every instance run (restarts)
   #    rather than just the initial launch
+  # More info: https://aws.amazon.com/premiumsupport/knowledge-center/execute-user-data-ec2/
 
   user_data = <<EOF
 Content-Type: multipart/mixed; boundary="//"
@@ -406,47 +407,74 @@ data "aws_ami" "amazon_linux_2" {
 //  }
 }
 
-# EC2 instance
-resource "aws_spot_instance_request" "privateSpotInstance" {
-  ami = data.aws_ami.amazon_linux_2.id
-  instance_type = "t3.nano"
-  subnet_id = aws_subnet.sigman_private_1.id
-  key_name = aws_key_pair.sigman_key.key_name
+# removing to save on cost
 
-  spot_price = "0.006"
-  spot_type = "one-time"
-  # Terraform will wait for the Spot Request to be fulfilled, and will throw
-  # an error if the timeout of 10m is reached.
-  wait_for_fulfillment = true
-
-  vpc_security_group_ids = [
-    aws_security_group.privateInstanceSG.id
-  ]
-
-  depends_on = [aws_security_group.privateInstanceSG]
-
-  tags = {
-    Name = "privateSpotInstance1"
-  }
-}
-
-output privateInstanceIp {
-  value = aws_spot_instance_request.privateSpotInstance.private_ip
-}
+## EC2 instance
+#resource "aws_spot_instance_request" "privateSpotInstance" {
+#  ami = data.aws_ami.amazon_linux_2.id
+#  instance_type = "t3.nano"
+#  subnet_id = aws_subnet.sigman_private_1.id
+#  key_name = aws_key_pair.sigman_key.key_name
+#
+#  spot_price = "0.006"
+#  spot_type = "one-time"
+#  # Terraform will wait for the Spot Request to be fulfilled, and will throw
+#  # an error if the timeout of 10m is reached.
+#  wait_for_fulfillment = true
+#
+#  vpc_security_group_ids = [
+#    aws_security_group.privateInstanceSG.id
+#  ]
+#
+#  depends_on = [aws_security_group.privateInstanceSG]
+#
+#  tags = {
+#    Name = "privateSpotInstance1"
+#  }
+#}
+#
+#output privateInstanceIp {
+#  value = aws_spot_instance_request.privateSpotInstance.private_ip
+#}
 
 ###################
 # Private Subnet ASG
 ###################
 
 data "template_file" "demo-njs-app_userdata" {
-  template = <<EOF
-#!/bin/bash
-git clone https://github.com/wsierakowski/demo-njs-app.git
-cd demo-njs-app
-npm i
-npm start
-  EOF
+  template = <<-EOF
+    #!/bin/bash
+    # AWS CLI will automatically pick the region this EC2 is run in
+    export AWS_REGION=$(curl http://169.254.169.254/latest/dynamic/instance-identity/document|grep region|awk -F\" '{print $4}')
+    # to make it available in other session for debugging
+    echo "export AWS_REGION=$AWS_REGION" >> /etc/profile.d/load_env.sh
+    chmod a+x /etc/profile.d/load_env.sh
+    cd /home/ec2-user
+    # sudo -u ec2-user bash -c 'git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > /var/log/demo-njs-app.log'
+    sudo -u ec2-user bash -c 'git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > ~/demo-njs-app.log'
+    EOF
+
+
+#  template = <<-EOF
+#    #!/bin/bash
+#    # AWS CLI will automatically pick the region this EC2 is run in
+#    export AWS_REGION=$(curl http://169.254.169.254/latest/dynamic/instance-identity/document|grep region|awk -F\" '{print $4}')
+#    # to make it available in other session for debugging (TODO: this doesn't work)
+#    echo "export AWS_REGION=$AWS_REGION" >> /etc/profile.d/load_env.sh
+#    chmod a+x /etc/profile.d/load_env.sh
+#    cd /home/ec2-user
+#    pwd
+#    sudo -u ec2-user git clone https://github.com/wsierakowski/demo-njs-app.git
+#    cd demo-njs-app
+#    # TODO Never run your app as a root
+#    sudo -u ec2-user npm i
+#    sudo -u ec2-user npm start > /var/log/demo-njs-app.log
+##    npm i
+##    npm start > /var/log/demo-njs-app.log
+#    EOF
 }
+
+# If the script doesn't work as expected, check this log /var/log/cloud-init-output.log
 
 resource "aws_launch_template" "demo-njs-app-lt" {
 
@@ -457,9 +485,9 @@ resource "aws_launch_template" "demo-njs-app-lt" {
   instance_type = "t3.micro"
   key_name = aws_key_pair.sigman_key.key_name
 
-#  iam_instance_profile {
-#    name = "test"
-#  }
+  iam_instance_profile {
+    name = aws_iam_role.demo-njs-app-role.name
+  }
 
   block_device_mappings {
     device_name = "/dev/xvda"
@@ -512,6 +540,9 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
     value               = "DemoNjsAppASGInstance"
     propagate_at_launch = true
   }
+
+  # Ensure ASG EC2 instances are stood up after the secret is created, otherwise secrets might be undefined at EC2 launch
+  depends_on = [aws_secretsmanager_secret_version.demo_psql_db]
 }
 
 # https://github.com/hashicorp/terraform-provider-aws/issues/511#issuecomment-624779778
@@ -768,7 +799,7 @@ resource "aws_route53_record" "www" {
 
 /*
 TODOs:
-- add NLB
++ add NLB
 - add ASG running from spot instances from launch template in priv subnet
   - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
 - provide consistency for naming convention,
@@ -776,8 +807,15 @@ TODOs:
   - subdomain for bastion
 - format spaces indent around equal sign
 - make bastion a spot instance
-- EC2 role with policy to access s3 and secret manager
-- update source code to look up correct secret
++ EC2 role with policy to access s3 and secret manager
+- read logs from nodejs on ec2
+  - remove sensitive info from app logs
+  - logrotate: https://stackoverflow.com/questions/65035838/how-can-i-rotate-log-files-in-pino-js-logger
+  - CloudWatch agent: https://tomgregory.com/shipping-aws-ec2-logs-to-cloudwatch-with-the-cloudwatch-agent/
+- check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
+
+- don't run node app as root because of user-data
+  - https://stackoverflow.com/questions/57443700/running-command-in-userdata-as-a-not-root-user
 
 terraform state list
 */
