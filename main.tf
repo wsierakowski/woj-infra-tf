@@ -451,7 +451,7 @@ data "template_file" "demo-njs-app_userdata" {
     chmod a+x /etc/profile.d/load_env.sh
     cd /home/ec2-user
     # sudo -u ec2-user bash -c 'git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > /var/log/demo-njs-app.log'
-    sudo -u ec2-user bash -c 'git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > ~/demo-njs-app.log'
+    sudo -u ec2-user bash -c '. /etc/profile.d/load_env.sh;echo "grzyb";echo $AWS_REGION;git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > ~/demo-njs-app.log'
     EOF
 
 
@@ -810,6 +810,7 @@ TODOs:
 + EC2 role with policy to access s3 and secret manager
 - read logs from nodejs on ec2
   - remove sensitive info from app logs
+  - https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/QuickStartEC2Instance.html
   - logrotate: https://stackoverflow.com/questions/65035838/how-can-i-rotate-log-files-in-pino-js-logger
   - CloudWatch agent: https://tomgregory.com/shipping-aws-ec2-logs-to-cloudwatch-with-the-cloudwatch-agent/
 - check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
