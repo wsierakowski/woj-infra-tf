@@ -446,11 +446,11 @@ data "template_file" "demo-njs-app_userdata" {
     #!/bin/bash
     # AWS CLI will automatically pick the region this EC2 is run in
     export AWS_REGION=$(curl http://169.254.169.254/latest/dynamic/instance-identity/document|grep region|awk -F\" '{print $4}')
-    # to make it available in other session for debugging
+    # to make it available in other session, handy for debugging
     echo "export AWS_REGION=$AWS_REGION" >> /etc/profile.d/load_env.sh
     chmod a+x /etc/profile.d/load_env.sh
     cd /home/ec2-user
-    # sudo -u ec2-user bash -c 'git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > /var/log/demo-njs-app.log'
+    # Never run your app as a root
     sudo -u ec2-user bash -c '. /etc/profile.d/load_env.sh;echo "grzyb";echo $AWS_REGION;git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > ~/demo-njs-app.log'
     EOF
 
@@ -798,25 +798,28 @@ resource "aws_route53_record" "www" {
 #}
 
 /*
-TODOs:
-+ add NLB
-- add ASG running from spot instances from launch template in priv subnet
-  - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
-- provide consistency for naming convention,
+Must TODOs:
+- check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
+
+- make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
+- provide consistency for naming convention
 - route53 (public and private hosted zone)
   - subdomain for bastion
 - format spaces indent around equal sign
-- make bastion a spot instance
 + EC2 role with policy to access s3 and secret manager
+- db state change alert
+
+Future improvements:
+- add ASG running from spot instances from launch template in priv subnet
+- make bastion a spot instance
 - read logs from nodejs on ec2
   - remove sensitive info from app logs
   - https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/QuickStartEC2Instance.html
   - logrotate: https://stackoverflow.com/questions/65035838/how-can-i-rotate-log-files-in-pino-js-logger
   - CloudWatch agent: https://tomgregory.com/shipping-aws-ec2-logs-to-cloudwatch-with-the-cloudwatch-agent/
-- check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
+- add NLB
+- update s3 policy to allow access to only one bucket
 
-- don't run node app as root because of user-data
-  - https://stackoverflow.com/questions/57443700/running-command-in-userdata-as-a-not-root-user
 
 terraform state list
 */
