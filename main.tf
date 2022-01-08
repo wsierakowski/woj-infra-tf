@@ -521,6 +521,8 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
   desired_capacity = 1
   min_size = 0
   max_size = 3
+  health_check_type = "ELB"
+  health_check_grace_period = 300
 
   # Required to redeploy without an outage.
   lifecycle {
@@ -799,15 +801,15 @@ resource "aws_route53_record" "www" {
 
 /*
 Must TODOs:
-- check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
+
+- db state change alert
+- route53 (public and private hosted zone)
+  - subdomain for bastion
 
 - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
 - provide consistency for naming convention
-- route53 (public and private hosted zone)
-  - subdomain for bastion
 - format spaces indent around equal sign
-+ EC2 role with policy to access s3 and secret manager
-- db state change alert
++ check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
 
 Future improvements:
 - add ASG running from spot instances from launch template in priv subnet
