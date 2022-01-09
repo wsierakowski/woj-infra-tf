@@ -764,26 +764,6 @@ resource "aws_lb_listener" "demo-njs-app-alb-listener-https" {
   }
 }
 
-###################
-# Route 53 hosted zone
-###################
-
-# TODO: look at this: https://github.com/hashicorp/terraform/issues/9289
-data "aws_route53_zone" "wojsierak" {
-  name         = "wojsierak.com."
-}
-
-resource "aws_route53_record" "www" {
-  zone_id = data.aws_route53_zone.wojsierak.zone_id
-#  name    = "dev.${data.aws_route53_zone.wojsierak.name}"
-  name    = data.aws_route53_zone.wojsierak.name
-  type    = "A"
-  alias {
-    name                   = aws_lb.demo-njs-app-alb.dns_name
-    zone_id                = aws_lb.demo-njs-app-alb.zone_id
-    evaluate_target_health = false
-  }
-}
 
 # TODO: missing alarm - look at DemoNjsAppOver50
 # hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
@@ -803,15 +783,16 @@ resource "aws_route53_record" "www" {
 Must TODOs:
 
 - db state change alert
-- route53 (public and private hosted zone)
-  - subdomain for bastion
-
++ subdomain for bastion
++ wojsierak.com ssl cert issue (cert is only for hahment.com)
 - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
 - provide consistency for naming convention
 - format spaces indent around equal sign
 + check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
 
 Future improvements:
+- move sample file to a subdir and gitognore its content
+- route 53 add hahment.com
 - add ASG running from spot instances from launch template in priv subnet
 - make bastion a spot instance
 - read logs from nodejs on ec2
@@ -821,6 +802,10 @@ Future improvements:
   - CloudWatch agent: https://tomgregory.com/shipping-aws-ec2-logs-to-cloudwatch-with-the-cloudwatch-agent/
 - add NLB
 - update s3 policy to allow access to only one bucket
+- route53 (public (other policies) and private hosted zone)
+- route53 healthchecks: https://console.aws.amazon.com/route53/healthchecks/home?#/
+- expose things like db name to vars (db will be named after that but also an sns topic)
+- lambda: https://stackoverflow.com/questions/59032142/terraform-cloudwatch-event-that-notifies-sns
 
 
 terraform state list
