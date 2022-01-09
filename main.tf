@@ -551,7 +551,7 @@ resource "aws_autoscaling_group" "demo-njs-app-asg" {
 data "aws_instances" "asg_instances_meta" {
   # to avoid "Error: Your query returned no results. Please change your search criteria and try again."
 
-depends_on = [aws_autoscaling_group.demo-njs-app-asg]
+  depends_on = [aws_autoscaling_group.demo-njs-app-asg]
   instance_tags = {
     # Use whatever name you have given to your instances
     Name = "DemoNjsAppASGInstance"
@@ -782,7 +782,7 @@ resource "aws_lb_listener" "demo-njs-app-alb-listener-https" {
 /*
 Must TODOs:
 
-- db state change alert
++ db state change alert
 + subdomain for bastion
 + wojsierak.com ssl cert issue (cert is only for hahment.com)
 - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
@@ -791,7 +791,8 @@ Must TODOs:
 + check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
 
 Future improvements:
-- move sample file to a subdir and gitognore its content
+- remove all london setup (except for bastion host on spot instance to have a ref)
++ move sample file to a subdir and gitognore its content
 - route 53 add hahment.com
 - add ASG running from spot instances from launch template in priv subnet
 - make bastion a spot instance
@@ -806,6 +807,7 @@ Future improvements:
 - route53 healthchecks: https://console.aws.amazon.com/route53/healthchecks/home?#/
 - expose things like db name to vars (db will be named after that but also an sns topic)
 - lambda: https://stackoverflow.com/questions/59032142/terraform-cloudwatch-event-that-notifies-sns
++ EIP
 
 
 terraform state list
