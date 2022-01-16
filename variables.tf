@@ -17,3 +17,8 @@ variable "cost_center" {
 variable "sns_notifications_email" {
     description = "Email use to set up SNS subscription for db state change events"
 }
+
+variable "create_private_instance" {
+    default = false
+    description = "Whether to create private spot instance"
+}

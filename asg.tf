@@ -5,6 +5,54 @@
 # Private Subnet ASG
 ###################
 
+# SG
+resource "aws_security_group" "private_instance" {
+
+  name = "private_instance"
+  description = "SG for private instance"
+  vpc_id = aws_vpc.sigman.id
+
+  # PING only from VPC
+  ingress {
+    from_port = -1
+    protocol = "icmp"
+    to_port = -1
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  # SSH only from VPC
+  ingress {
+    from_port = 22
+    protocol = "tcp"
+    to_port = 22
+    cidr_blocks = [
+      "10.0.0.0/16"]
+  }
+
+  # 3000 only from VPC for nodejs web app port
+  ingress {
+    from_port = 3000
+    protocol = "tcp"
+    to_port = 3000
+    cidr_blocks = [
+      "10.0.0.0/16"]
+  }
+
+  # Allow all traffic out
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    # Can't reach NAT Instance with this setting for some reason
+    #    cidr_blocks      = ["10.0.0.0/16"]
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 data "template_file" "demo-njs-app_userdata" {
   template = <<-EOF
     #!/bin/bash

@@ -27,53 +27,6 @@ resource "aws_key_pair" "sigman" {
 # Private Subnet Instance (temporarily until ASG is created)
 ###################
 
-# SG
-resource "aws_security_group" "private_instance" {
-  name = "private_instance"
-  description = "SG for private instance"
-  vpc_id = aws_vpc.sigman.id
-
-  # PING only from VPC
-  ingress {
-    from_port = -1
-    protocol = "icmp"
-    to_port = -1
-    cidr_blocks = ["10.0.0.0/16"]
-  }
-
-  # SSH only from VPC
-  ingress {
-    from_port = 22
-    protocol = "tcp"
-    to_port = 22
-    cidr_blocks = [
-      "10.0.0.0/16"]
-  }
-
-  # 3000 only from VPC for nodejs web app port
-  ingress {
-    from_port = 3000
-    protocol = "tcp"
-    to_port = 3000
-    cidr_blocks = [
-      "10.0.0.0/16"]
-  }
-
-  # Allow all traffic out
-  egress {
-    from_port        = 0
-    to_port          = 0
-    protocol         = "-1"
-    # Can't reach NAT Instance with this setting for some reason
-#    cidr_blocks      = ["10.0.0.0/16"]
-    cidr_blocks      = ["0.0.0.0/0"]
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
 data "aws_ami" "amazon_linux_2" {
   most_recent = true
   owners = ["amazon"]
@@ -90,35 +43,35 @@ data "aws_ami" "amazon_linux_2" {
 //  }
 }
 
-# removing to save on cost
-
 ## EC2 instance
-#resource "aws_spot_instance_request" "privateSpotInstance" {
-#  ami = data.aws_ami.amazon_linux_2.id
-#  instance_type = "t3.nano"
-#  subnet_id = aws_subnet.sigman_private_1.id
-#  key_name = aws_key_pair.sigman_key.key_name
-#
-#  spot_price = "0.006"
-#  spot_type = "one-time"
-#  # Terraform will wait for the Spot Request to be fulfilled, and will throw
-#  # an error if the timeout of 10m is reached.
-#  wait_for_fulfillment = true
-#
-#  vpc_security_group_ids = [
-#    aws_security_group.privateInstanceSG.id
-#  ]
-#
-#  depends_on = [aws_security_group.privateInstanceSG]
-#
-#  tags = {
-#    Name = "privateSpotInstance1"
-#  }
-#}
-#
-#output privateInstanceIp {
-#  value = aws_spot_instance_request.privateSpotInstance.private_ip
-#}
+resource "aws_spot_instance_request" "privateSpotInstance" {
+  count = var.create_private_instance ? 1 : 0
+
+  ami = data.aws_ami.amazon_linux_2.id
+  instance_type = "t3.nano"
+  subnet_id = aws_subnet.sigman_private_1.id
+  key_name = aws_key_pair.sigman.key_name
+
+  spot_price = "0.006"
+  spot_type = "one-time"
+  # Terraform will wait for the Spot Request to be fulfilled, and will throw
+  # an error if the timeout of 10m is reached.
+  wait_for_fulfillment = true
+
+  vpc_security_group_ids = [
+    aws_security_group.private_instance.id
+  ]
+
+  depends_on = [aws_security_group.private_instance]
+
+  tags = {
+    Name = "privateSpotInstance1"
+  }
+}
+
+output privateInstanceIp {
+  value = var.create_private_instance == true ? null : aws_spot_instance_request.privateSpotInstance[*].private_ip
+}
 
 # TODO: missing alarm - look at DemoNjsAppOver50
 # hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
