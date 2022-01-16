@@ -1,9 +1,16 @@
 # Local .terraform directories
 **/.terraform/*
 
+# You must also be careful not to check .tfvars files with sensitive values into version control.
+# For this reason, GitHub's recommended .gitignore file for Terraform configuration is configured to ignore
+#  files matching the pattern *.tfvars.
+*.tfvars
+
 # .tfstate files
 *.tfstate
 *.tfstate.*
+
+/temp
 
 # Crash log files
 crash.log

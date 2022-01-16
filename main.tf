@@ -120,7 +120,6 @@ data "aws_ami" "amazon_linux_2" {
 #  value = aws_spot_instance_request.privateSpotInstance.private_ip
 #}
 
-
 # TODO: missing alarm - look at DemoNjsAppOver50
 # hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
 # also: https://hands-on.cloud/terraform-recipe-managing-auto-scaling-groups-and-load-balancers/
@@ -138,8 +137,8 @@ data "aws_ami" "amazon_linux_2" {
 /*
 Must TODOs:
 
-- db state change alert
 - update s3 policy to allow access to only one bucket
++ db state change alert
 + subdomain for bastion
 + wojsierak.com ssl cert issue (cert is only for hahment.com)
 - cleanup
@@ -150,6 +149,7 @@ Must TODOs:
 + check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
 
 Future improvements:
+- remove all london setup (except for bastion host on spot instance to have a ref)
 + move sample file to a subdir and gitognore its content
 - route 53 add hahment.com
 - ASG
@@ -194,6 +194,7 @@ Future improvements:
 - Build QuickSight to analize data in s3
 - tf improvement - use conditional setup
   - count = var.create_public_subnets ? 1 : 0
++ EIP
 
 
 terraform state list

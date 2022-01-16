@@ -22,7 +22,7 @@ locals {
 }
 
 resource "local_file" "sample_file" {
-  filename = "sample_file.txt"
+  filename = "temp/sample_file.txt"
   content = local.sample_file_content
 }
 
