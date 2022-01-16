@@ -1,343 +1,26 @@
+# Conventions:
+# - resource names:
+#  - lowercase with underscores without repeating resource name
+#  - singular nouns
+#  - use the plural form in a variable name when type is list(...) or map(...)
+# - tags at the bottom
+# - use dashes in argument values that will be read by a human (vpc_id = "vpc-123")
+# - outputs
+#  - {name}_{type}_{attribute} (security_group_id, rds_cluster_instance_endpoints)
+#  - include description for all outputs even if you think it is obvious
+
 provider "aws" {
   region = "eu-central-1"
 }
 
 data "aws_caller_identity" "my_account" {}
 
-resource "aws_vpc" "sigman_vpc" {
-  cidr_block = "10.0.0.0/16"
-
-  tags = {
-    Name = "sigmanVPC"
-  }
-}
-
 # Hint: Generate pub from pem:
 # $ ssh-keygen -y -f ~/Downloads/privkey.pem > ~/Downloads/pubkey.pub
 
-resource "aws_key_pair" "sigman_key" {
-  key_name   = "sigman_key"
+resource "aws_key_pair" "sigman" {
+  key_name   = "sigman"
   public_key = "${file("~/Downloads/sigman.pub")}"
-}
-
-###################
-# Public Subnets
-###################
-
-resource "aws_subnet" "sigman_public_1" {
-  cidr_block = "10.0.1.0/24"
-  vpc_id = aws_vpc.sigman_vpc.id
-  availability_zone = "eu-central-1a"
-
-  tags = {
-    Name = "sigmanPublic1"
-  }
-}
-
-resource "aws_subnet" "sigman_public_2" {
-  cidr_block = "10.0.2.0/24"
-  vpc_id = aws_vpc.sigman_vpc.id
-  availability_zone = "eu-central-1b"
-
-  tags = {
-    Name = "sigmanPublic2"
-  }
-}
-
-resource "aws_internet_gateway" "sigman_igw" {
-  vpc_id = aws_vpc.sigman_vpc.id
-
-  tags = {
-    Name = "sigmanIGW"
-  }
-}
-
-resource "aws_route_table" "sigman_public_rt" {
-  vpc_id = aws_vpc.sigman_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.sigman_igw.id
-  }
-
-  tags = {
-    Name = "sigmanPublicRT"
-  }
-}
-
-resource "aws_route_table_association" "rta_public_1" {
-  route_table_id = aws_route_table.sigman_public_rt.id
-  subnet_id = aws_subnet.sigman_public_1.id
-}
-
-resource "aws_route_table_association" "rta_public_2" {
-  route_table_id = aws_route_table.sigman_public_rt.id
-  subnet_id = aws_subnet.sigman_public_2.id
-}
-
-###################
-# NATandBastion
-###################
-
-# SG
-resource "aws_security_group" "natAndBastionInstanceSG" {
-  name = "nat_bastion_SG"
-  description = "SG for NATandBastionInstance"
-  vpc_id = aws_vpc.sigman_vpc.id
-
-  # HTTPS only from VPC
-  ingress {
-    from_port = 443
-    protocol = "tcp"
-    to_port = 443
-    cidr_blocks = ["10.0.0.0/16"]
-  }
-
-  # HTTP only from VPC
-  ingress {
-    from_port = 80
-    protocol = "tcp"
-    to_port = 80
-    cidr_blocks = ["10.0.0.0/16"]
-  }
-
-  # PING only from VPC
-  ingress {
-    from_port = -1
-    protocol = "icmp"
-    to_port = -1
-    cidr_blocks = ["10.0.0.0/16"]
-  }
-
-  # SSH from anywhere (VPC and internet)
-  ingress {
-    from_port = 22
-    protocol = "tcp"
-    to_port = 22
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Ephemeral ports (for requests initiated from VPC)
-  ingress {
-    from_port = 1024
-    protocol = "tcp"
-    to_port = 65535
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Allow all traffic out
-  egress {
-    from_port        = 0
-    to_port          = 0
-    protocol         = "-1"
-    cidr_blocks      = ["0.0.0.0/0"]
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# EC2 instance
-resource "aws_instance" "natAndBastionInstance" {
-  ami = "ami-08b9633fe44dfcba1"
-  instance_type = "t3.nano"
-  subnet_id = aws_subnet.sigman_public_1.id
-  associate_public_ip_address = true
-  key_name = aws_key_pair.sigman_key.key_name
-
-  vpc_security_group_ids = [
-    aws_security_group.natAndBastionInstanceSG.id
-  ]
-  depends_on = [aws_security_group.natAndBastionInstanceSG]
-
-  # User-data script to enable NAT capabilities
-  #    wrapped into cloud-config to allow running on every instance run (restarts)
-  #    rather than just the initial launch
-  # More info: https://aws.amazon.com/premiumsupport/knowledge-center/execute-user-data-ec2/
-
-  user_data = <<EOF
-Content-Type: multipart/mixed; boundary="//"
-MIME-Version: 1.0
-
---//
-Content-Type: text/cloud-config; charset="us-ascii"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Content-Disposition: attachment; filename="cloud-config.txt"
-
-#cloud-config
-cloud_final_modules:
-- [scripts-user, always]
-
---//
-Content-Type: text/x-shellscript; charset="us-ascii"
-MIME-Version: 1.0
-Content-Transfer-Encoding: 7bit
-Content-Disposition: attachment; filename="userdata.txt"
-
-#!/bin/bash -xe
-exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
-  sysctl -w net.ipv4.ip_forward=1
-  /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
---//--
-  EOF
-
-  # Required for NAT
-  source_dest_check = false
-
-  tags = {
-    Name = "NATandBastion"
-  }
-}
-
-output natAndBastionInstancePubIp {
-  value = aws_instance.natAndBastionInstance.public_ip
-}
-
-output natAndBastionInstancePrivIp {
-  value = aws_instance.natAndBastionInstance.private_ip
-}
-
-## EC2 Spot instance
-#resource "aws_spot_instance_request" "natAndBastionInstance" {
-#  ami = "ami-08b9633fe44dfcba1"
-#  instance_type = "t3.nano"
-#  subnet_id = aws_subnet.sigman_public_1.id
-#  associate_public_ip_address = true
-#  key_name = aws_key_pair.sigman_key.key_name
-#
-#  spot_price = "0.006"
-#  spot_type = "one-time"
-#  # Terraform will wait for the Spot Request to be fulfilled, and will throw
-#  # an error if the timeout of 10m is reached.
-#  wait_for_fulfillment = true
-#
-#  vpc_security_group_ids = [
-#    aws_security_group.natAndBastionInstanceSG.id
-#  ]
-#  depends_on = [aws_security_group.natAndBastionInstanceSG]
-#
-#  # 1. User-data script to enable NAT capabilities
-#  #    wrapped into cloud-config to allow running on every instance run
-#  #    rather than just the initial launch
-#  # 2. TF doesn't support setting source_dest_check on spot instances
-#  #    https://github.com/hashicorp/terraform-provider-aws/issues/2751
-#  #    Workaround: https://github.com/pulumi/pulumi-aws/issues/959
-#  user_data = <<EOF
-#    Content-Type: multipart/mixed; boundary="//"
-#    MIME-Version: 1.0
-#
-#    --//
-#    Content-Type: text/cloud-config; charset="us-ascii"
-#    MIME-Version: 1.0
-#    Content-Transfer-Encoding: 7bit
-#    Content-Disposition: attachment; filename="cloud-config.txt"
-#
-#    #cloud-config
-#    cloud_final_modules:
-#    - [scripts-user, always]
-#
-#    --//
-#    Content-Type: text/x-shellscript; charset="us-ascii"
-#    MIME-Version: 1.0
-#    Content-Transfer-Encoding: 7bit
-#    Content-Disposition: attachment; filename="userdata.txt"
-#
-#    #!/bin/bash -xe
-#    exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
-#      sysctl -w net.ipv4.ip_forward=1
-#      /sbin/iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-#    REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | awk -F'"' '/"region"/ { print $4 }')
-#    INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-#    aws --region $REGION ec2 modify-instance-attribute --instance-id "$INSTANCE_ID" --no-source-dest-check
-#    --//--
-#  EOF
-#
-#  # Required for NAT
-#  source_dest_check = false
-#
-#  tags = {
-#    Name = "NATandBastion"
-#  }
-#
-#  # Tags don't work on spot instance as per this ticket: https://github.com/hashicorp/terraform/issues/3263
-#  # hence the workaround below (doesnt' work)
-#  # when troubleshooting, look at this: https://github.com/int128/terraform-aws-nat-instance/blob/master/main.tf
-#
-#  # provisioner "local-exec" {
-#  #  command = "aws ec2 create-tags --resources ${aws_spot_instance_request.natAndBastionInstance.spot_instance_id} --tags Key=Name,Value=ec2-resource-name"
-#  #}
-#}
-#
-#output natAndBastionInstancePubIp {
-#  value = aws_spot_instance_request.natAndBastionInstance.public_ip
-#}
-#
-#output natAndBastionInstancePrivIp {
-#  value = aws_spot_instance_request.natAndBastionInstance.private_ip
-#}
-
-###################
-# Private Subnets
-###################
-
-resource "aws_subnet" "sigman_private_1" {
-  cidr_block = "10.0.3.0/24"
-  vpc_id = aws_vpc.sigman_vpc.id
-  availability_zone = "eu-central-1a"
-
-  tags = {
-    Name = "sigmanPrivate1"
-  }
-}
-
-resource "aws_subnet" "sigman_private_2" {
-  cidr_block = "10.0.4.0/24"
-  vpc_id = aws_vpc.sigman_vpc.id
-  availability_zone = "eu-central-1b"
-
-  tags = {
-    Name = "sigmanPrivate2"
-  }
-}
-
-resource "aws_route_table" "sigman_private_rt" {
-#  depends_on = [aws_spot_instance_request.natAndBastionInstance]
-
-  vpc_id = aws_vpc.sigman_vpc.id
-
-  # https://github.com/hashicorp/terraform-provider-aws/issues/1426
-#  route {
-#    cidr_block = "0.0.0.0/0"
-#    # nat_gateway_id = ""
-#    # gateway_id = aws_internet_gateway.sigman_igw.id
-##    instance_id = aws_instance.natAndBastionInstance.id
-#    # without this, plan reapply will show a change due to this populated
-#    network_interface_id = aws_instance.natAndBastionInstance.primary_network_interface_id
-#  }
-
-  tags = {
-    Name = "sigmanPrivateRT"
-  }
-}
-
-# https://github.com/hashicorp/terraform-provider-aws/issues/1426
-# inline route in route table was always showing a change (instance id auto populated or net_int_id if instance_id was provided)
-resource "aws_route" "vpn" {
-  route_table_id = aws_route_table.sigman_private_rt.id
-  network_interface_id = aws_instance.natAndBastionInstance.primary_network_interface_id
-  destination_cidr_block = "0.0.0.0/0"
-}
-
-resource "aws_route_table_association" "rta_private_1" {
-  route_table_id = aws_route_table.sigman_private_rt.id
-  subnet_id = aws_subnet.sigman_private_1.id
-}
-
-resource "aws_route_table_association" "rta_private_2" {
-  route_table_id = aws_route_table.sigman_private_rt.id
-  subnet_id = aws_subnet.sigman_private_2.id
 }
 
 ###################
@@ -345,10 +28,10 @@ resource "aws_route_table_association" "rta_private_2" {
 ###################
 
 # SG
-resource "aws_security_group" "privateInstanceSG" {
-  name = "private_instance_SG"
+resource "aws_security_group" "private_instance" {
+  name = "private_instance"
   description = "SG for private instance"
-  vpc_id = aws_vpc.sigman_vpc.id
+  vpc_id = aws_vpc.sigman.id
 
   # PING only from VPC
   ingress {
@@ -437,333 +120,6 @@ data "aws_ami" "amazon_linux_2" {
 #  value = aws_spot_instance_request.privateSpotInstance.private_ip
 #}
 
-###################
-# Private Subnet ASG
-###################
-
-data "template_file" "demo-njs-app_userdata" {
-  template = <<-EOF
-    #!/bin/bash
-    # AWS CLI will automatically pick the region this EC2 is run in
-    export AWS_REGION=$(curl http://169.254.169.254/latest/dynamic/instance-identity/document|grep region|awk -F\" '{print $4}')
-    # to make it available in other session, handy for debugging
-    echo "export AWS_REGION=$AWS_REGION" >> /etc/profile.d/load_env.sh
-    chmod a+x /etc/profile.d/load_env.sh
-    cd /home/ec2-user
-    # Never run your app as a root
-    sudo -u ec2-user bash -c '. /etc/profile.d/load_env.sh;echo "grzyb";echo $AWS_REGION;git clone https://github.com/wsierakowski/demo-njs-app.git;cd demo-njs-app;npm i;npm start > ~/demo-njs-app.log'
-    EOF
-
-
-#  template = <<-EOF
-#    #!/bin/bash
-#    # AWS CLI will automatically pick the region this EC2 is run in
-#    export AWS_REGION=$(curl http://169.254.169.254/latest/dynamic/instance-identity/document|grep region|awk -F\" '{print $4}')
-#    # to make it available in other session for debugging (TODO: this doesn't work)
-#    echo "export AWS_REGION=$AWS_REGION" >> /etc/profile.d/load_env.sh
-#    chmod a+x /etc/profile.d/load_env.sh
-#    cd /home/ec2-user
-#    pwd
-#    sudo -u ec2-user git clone https://github.com/wsierakowski/demo-njs-app.git
-#    cd demo-njs-app
-#    # TODO Never run your app as a root
-#    sudo -u ec2-user npm i
-#    sudo -u ec2-user npm start > /var/log/demo-njs-app.log
-##    npm i
-##    npm start > /var/log/demo-njs-app.log
-#    EOF
-}
-
-# If the script doesn't work as expected, check this log /var/log/cloud-init-output.log
-
-resource "aws_launch_template" "demo-njs-app-lt" {
-
-  name = "demo-njs-app-lt"
-
-  // TODO, this should have been searched and found in case the AMI is copied to other regions
-  image_id = "ami-077f7be394e6e7874"
-  instance_type = "t3.micro"
-  key_name = aws_key_pair.sigman_key.key_name
-
-  iam_instance_profile {
-    name = aws_iam_role.demo-njs-app-role.name
-  }
-
-  block_device_mappings {
-    device_name = "/dev/xvda"
-
-    ebs {
-      volume_size = 8
-      volume_type = "gp2"
-      delete_on_termination = true
-    }
-  }
-
-  vpc_security_group_ids = [aws_security_group.privateInstanceSG.id]
-
-  tag_specifications {
-    resource_type = "instance"
-
-    tags = {
-      Name = "test-bla-bla"
-      Name2 = "test-bla-bla"
-    }
-  }
-
-  # https://github.com/hashicorp/terraform-provider-aws/issues/5530
-  user_data = base64encode(data.template_file.demo-njs-app_userdata.rendered)
-}
-
-resource "aws_autoscaling_group" "demo-njs-app-asg" {
-  name = "demo-njs-app-asg"
-#  availability_zones = ["eu-central-1a", "eu-central-1b"]
-  vpc_zone_identifier = [aws_subnet.sigman_private_1.id, aws_subnet.sigman_private_2.id]
-  desired_capacity = 1
-  min_size = 0
-  max_size = 3
-  health_check_type = "ELB"
-  health_check_grace_period = 300
-
-  # Required to redeploy without an outage.
-  lifecycle {
-    create_before_destroy = true
-    # As per the note here https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/autoscaling_attachment
-    # and discussion here: https://github.com/hashicorp/terraform-provider-aws/issues/14540#issuecomment-680099770
-    ignore_changes = [load_balancers, target_group_arns]
-  }
-
-  launch_template {
-    id = aws_launch_template.demo-njs-app-lt.id
-    version = "$Latest"
-  }
-
-  tag {
-    key                 = "Name"
-    value               = "DemoNjsAppASGInstance"
-    propagate_at_launch = true
-  }
-
-  # Ensure ASG EC2 instances are stood up after the secret is created, otherwise secrets might be undefined at EC2 launch
-  depends_on = [aws_secretsmanager_secret_version.demo_psql_db]
-}
-
-# https://github.com/hashicorp/terraform-provider-aws/issues/511#issuecomment-624779778
-data "aws_instances" "asg_instances_meta" {
-  # to avoid "Error: Your query returned no results. Please change your search criteria and try again."
-
-depends_on = [aws_autoscaling_group.demo-njs-app-asg]
-  instance_tags = {
-    # Use whatever name you have given to your instances
-    Name = "DemoNjsAppASGInstance"
-  }
-}
-
-output "asg_private_ips" {
-  description = "Private IPs of ASG instances"
-  value = data.aws_instances.asg_instances_meta.private_ips
-}
-
-#Metric value
-#
-#-infinity          30%    40%          60%     70%             infinity
-#-----------------------------------------------------------------------
-#          -30%      | -10% | Unchanged  | +10%  |       +30%
-#-----------------------------------------------------------------------
-# Need to be two separate policies, one for scaling up and other down:
-#   https://github.com/hashicorp/terraform-provider-aws/issues/10376
-
-resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy-down" {
-  name                   = "demo-njs-app-asg-scaling-policy-down"
-  adjustment_type        = "PercentChangeInCapacity"
-  autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.name
-  policy_type = "StepScaling"
-
-  # Those bounds values are added to the alarm's threshold value
-
-  step_adjustment {
-    scaling_adjustment          = -30
-    metric_interval_upper_bound = -20
-  }
-
-  step_adjustment {
-    scaling_adjustment          = -10
-    metric_interval_lower_bound = -20
-    metric_interval_upper_bound = -10
-  }
-}
-
-resource "aws_autoscaling_policy" "demo-njs-app-asg-scaling-policy-up" {
-  name                   = "demo-njs-app-asg-scaling-policy-up"
-  adjustment_type        = "PercentChangeInCapacity"
-  autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.name
-  policy_type = "StepScaling"
-
-  # Those bounds values are added to the alarm's threshold value
-
-#  step_adjustment {
-#    scaling_adjustment          = 0
-#    metric_interval_lower_bound = -10
-#    metric_interval_upper_bound = 10
-#  }
-
-  step_adjustment {
-    scaling_adjustment          = 10
-    metric_interval_lower_bound = 10
-    metric_interval_upper_bound = 20
-  }
-
-  step_adjustment {
-    scaling_adjustment          = 30
-    metric_interval_lower_bound = 20
-  }
-}
-
-resource "aws_cloudwatch_metric_alarm" "demo-njs-app-cpu-alarm" {
-  alarm_name          = "demo-njs-app-cpu-over50-alarm"
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 2
-  metric_name = "CPUUtilization"
-  namespace = "AWS/EC2"
-  period = 60
-  statistic = "Average"
-  threshold = 50
-
-  dimensions = {
-    AutoScalingGroupName = aws_autoscaling_group.demo-njs-app-asg.name
-  }
-
-  alarm_description = "This metric monitors EC2 CPU utilization"
-  alarm_actions = [aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-down.arn, aws_autoscaling_policy.demo-njs-app-asg-scaling-policy-up.arn]
-}
-
-###################
-# ALB
-###################
-
-# SG
-resource "aws_security_group" "demo-njs-app-alb-sg" {
-  name = "demo-njs-app-alb-sg"
-  description = "SG for private instance"
-  vpc_id = aws_vpc.sigman_vpc.id
-
-  ingress {
-    from_port = 443
-    protocol = "tcp"
-    to_port = 443
-    cidr_blocks = [
-      "0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port = 80
-    protocol = "tcp"
-    to_port = 80
-    cidr_blocks = [
-      "0.0.0.0/0"]
-  }
-
-  # TODO: what if there was no egress specified? Should we actually allow all, SG are stateful.
-  # Allow all traffic out
-  egress {
-    from_port        = 0
-    to_port          = 0
-    protocol         = "-1"
-    # Can't reach NAT Instance with this setting for some reason
-    #    cidr_blocks      = ["10.0.0.0/16"]
-    cidr_blocks      = ["0.0.0.0/0"]
-  }
-
-#  lifecycle {
-#    create_before_destroy = true
-#  }
-}
-
-resource "aws_lb_target_group" "demo-njs-app-tg" {
-  name = "demo-njs-app-tg"
-  port = 3000
-  protocol = "HTTP"
-  vpc_id = aws_vpc.sigman_vpc.id
-
-  health_check {
-    path = "/health"
-    port = "traffic-port"
-    # 5 consecutive health check successes
-    healthy_threshold = 5
-    # 2 consecutive health check failures
-    unhealthy_threshold = 2
-    timeout = 5
-    interval = 30
-    # Success codes
-    matcher = "200"
-  }
-}
-
-resource "aws_lb" "demo-njs-app-alb" {
-  name = "demo-njs-app-alb"
-  internal = false
-  load_balancer_type = "application"
-  security_groups = [aws_security_group.demo-njs-app-alb-sg.id]
-  subnets = [aws_subnet.sigman_public_1.id, aws_subnet.sigman_public_2.id]
-
-#  enable_deletion_protection = true
-}
-
-output "alb_dns_name" {
-  description = "The DNS name of the load balancer."
-  value = aws_lb.demo-njs-app-alb.dns_name
-}
-
-## TODO: this is failing, but look at this: https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/autoscaling_attachment
-#resource "aws_lb_target_group_attachment" "demo-njs-app-alb-attachment" {
-#  target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
-#  target_id        = aws_lb.demo-njs-app-alb.arn
-#}
-# =====================
-resource "aws_autoscaling_attachment" "asg_attachment_test" {
-  autoscaling_group_name = aws_autoscaling_group.demo-njs-app-asg.id
-  alb_target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
-}
-
-# =====================
-resource "aws_lb_listener" "demo-njs-app-alb-listener-http" {
-  load_balancer_arn = aws_lb.demo-njs-app-alb.arn
-  port              = "80"
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
-  }
-}
-
-# https://stackoverflow.com/questions/64310497/terraform-aws-and-importing-existing-ssl-certificates
-resource "aws_acm_certificate" "hahment-com-cert" {
-  private_key = file("~/Downloads/klucz_prywatny_.txt")
-  certificate_body = file("~/Downloads/certyfikat_.txt")
-  certificate_chain = file("~/Downloads/certyfikat_posredni_.txt")
-
-  tags = {
-    domain = "hahment.com"
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_lb_listener" "demo-njs-app-alb-listener-https" {
-  load_balancer_arn = aws_lb.demo-njs-app-alb.arn
-  port              = "443"
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-2016-08"
-  certificate_arn   = aws_acm_certificate.hahment-com-cert.arn
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.demo-njs-app-tg.arn
-  }
-}
-
 
 # TODO: missing alarm - look at DemoNjsAppOver50
 # hints: https://geekdudes.wordpress.com/2018/01/10/amazon-autosclaing-using-terraform/
@@ -783,17 +139,22 @@ resource "aws_lb_listener" "demo-njs-app-alb-listener-https" {
 Must TODOs:
 
 - db state change alert
+- update s3 policy to allow access to only one bucket
 + subdomain for bastion
 + wojsierak.com ssl cert issue (cert is only for hahment.com)
-- make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
-- provide consistency for naming convention
-- format spaces indent around equal sign
+- cleanup
+  - provide consistency for naming convention
+    - https://www.terraform-best-practices.com/naming
+  - make names derived from vars, for reuse, like here: https://github.com/hashicorp/terraform-provider-aws/issues/14540
+  - format spaces indent around equal sign
 + check why ASG isn't seeing failing healthcheck - are healthchecks correctly set up?
 
 Future improvements:
-- move sample file to a subdir and gitognore its content
++ move sample file to a subdir and gitognore its content
 - route 53 add hahment.com
-- add ASG running from spot instances from launch template in priv subnet
+- ASG
+  - add ASG running from spot instances from launch template in priv subnet
+  - add an autoscaling:EC2_INSTANCE_TERMINATING lifecycle hook to your Auto Scaling group
 - make bastion a spot instance
 - read logs from nodejs on ec2
   - remove sensitive info from app logs
@@ -801,11 +162,38 @@ Future improvements:
   - logrotate: https://stackoverflow.com/questions/65035838/how-can-i-rotate-log-files-in-pino-js-logger
   - CloudWatch agent: https://tomgregory.com/shipping-aws-ec2-logs-to-cloudwatch-with-the-cloudwatch-agent/
 - add NLB
-- update s3 policy to allow access to only one bucket
 - route53 (public (other policies) and private hosted zone)
 - route53 healthchecks: https://console.aws.amazon.com/route53/healthchecks/home?#/
 - expose things like db name to vars (db will be named after that but also an sns topic)
 - lambda: https://stackoverflow.com/questions/59032142/terraform-cloudwatch-event-that-notifies-sns
+- s3 with SSE KMS + audit trail (https://www.bogotobogo.com/DevOps/AWS/aws-qwiklabs-KMS.php)
+- EFS
+- VPC peering
+- S3 endpoint (interface vs gateway)
+- VPN gateway
+- Are DNS resolution and DNS hostnames attributes enabled for a VPC?
+- AWS Storage Gateway
+- add app authentication (Cognito?)
+- Define the tags on the UAT and production servers and add a condition to the IAM policy which allows access to specific tags.
+  - start using tags for every ec2
+  - instances created by an ASG have that ASG id as a tag
+- Run AWS Trusted Advisor to get optimisation tips
+- Use SSM
+ - to install software with RUN command
+ - use automation to update AMIs
+ - parameter store vs secrets manager (scoped with IAM policy)
+ - configure lambda function that will be triggered by an eventbridge event - sent when run command completes
+ - run run command when ec2 up event happens
+- LEarn how to process logs through Athena
+- Use AWS CodeDeploy to deploy node/java app instead of pulling directly from github and getting and decrypt param from SSM
+- CloudWatch
+  - set alert based on number of errors in the log (log could be console.log from nodejs lambda)
+  - install cloud watch agent and collect stastd metrics from the app itself (CWAgent namespace)
+  - read app logs
+- Amazon inspector to scan for vulverabilities, once CVE is found, send sns which triggers lambda to call SSM to update the instance
+- Build QuickSight to analize data in s3
+- tf improvement - use conditional setup
+  - count = var.create_public_subnets ? 1 : 0
 
 
 terraform state list

@@ -34,14 +34,14 @@ resource "aws_db_subnet_group" "sigman_db_sg" {
 resource "aws_security_group" "sigman_psql_sg" {
   name = "sigman-psql_SG"
   description = "SG for psql db"
-  vpc_id = aws_vpc.sigman_vpc.id
+  vpc_id = aws_vpc.sigman.id
 
   # PING only from VPC
   ingress {
     from_port = 5432
     protocol = "tcp"
     to_port = 5432
-    security_groups = [aws_security_group.privateInstanceSG.id, aws_security_group.natAndBastionInstanceSG.id]
+    security_groups = [aws_security_group.private_instance.id, aws_security_group.nat-and-bastion-instance.id]
 #    cidr_blocks = aws_vpc.sigman_vpc.cidr_block
     #    cidr_blocks = ["10.0.0.0/16"]
   }

@@ -23,5 +23,5 @@ resource "aws_route53_record" "entry_subdomain" {
   type    = "A"
   zone_id = data.aws_route53_zone.wojsierak.zone_id
   ttl = 300
-  records = [aws_instance.natAndBastionInstance.public_ip]
+  records = [aws_instance.nat_and_bastion-instance.public_ip]
 }
