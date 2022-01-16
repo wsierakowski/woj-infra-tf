@@ -90,7 +90,7 @@ output privateInstanceIp {
 /*
 Must TODOs:
 
-- update s3 policy to allow access to only one bucket
+- update s3 policy to allow access from only one bucket
 + db state change alert
 + subdomain for bastion
 + wojsierak.com ssl cert issue (cert is only for hahment.com)
@@ -151,4 +151,5 @@ Future improvements:
 
 
 terraform state list
+terraform output
 */
