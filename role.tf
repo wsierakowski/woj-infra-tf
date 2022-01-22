@@ -4,6 +4,7 @@
 #  arn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
 #}
 
+# https://aws.amazon.com/blogs/security/writing-iam-policies-how-to-grant-access-to-an-amazon-s3-bucket/
 data "aws_iam_policy_document" "read_access_to_demonjsapp_bucket" {
   version = "2012-10-17"
 

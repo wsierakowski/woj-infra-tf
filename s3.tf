@@ -32,3 +32,20 @@ resource "aws_s3_bucket_object" "sample_file" {
   source = local_file.sample_file.filename
 #  etag = filemd5(local_file.sample_file.content)
 }
+
+
+## VPC Gateway Endpoint to allow private subnets access s3 without NAT and to keep traffic to s3 internal to AWS
+resource "aws_vpc_endpoint" "s3_demo-njs-bucket" {
+  service_name = "com.amazonaws.eu-central-1.s3"
+  vpc_id       = aws_vpc.sigman.id
+  tags = {
+    Name = "demo-njs-app-bucket_endpoint"
+  }
+}
+
+# Prefix list is going to be automatically created and added to route table as the destination
+# https://www.youtube.com/watch?v=5tyOCzZdXaQ
+resource "aws_vpc_endpoint_route_table_association" "s3_demo-njs-bucket" {
+  route_table_id  = aws_route_table.sigman_private.id
+  vpc_endpoint_id = aws_vpc_endpoint.s3_demo-njs-bucket.id
+}

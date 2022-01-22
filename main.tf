@@ -90,7 +90,7 @@ output privateInstanceIp {
 /*
 Must TODOs:
 
-- update s3 policy to allow access from only one bucket
++ update s3 policy to allow access from only one bucket
 + db state change alert
 + subdomain for bastion
 + wojsierak.com ssl cert issue (cert is only for hahment.com)
@@ -122,7 +122,9 @@ Future improvements:
 - s3 with SSE KMS + audit trail (https://www.bogotobogo.com/DevOps/AWS/aws-qwiklabs-KMS.php)
 - EFS
 - VPC peering
-- S3 endpoint (interface vs gateway)
++ S3 endpoint (interface vs gateway - no charge)
+  + currently access through NAT instance - check this is the case by stopping it. What port to block, 443?
+  + confirmed private instance has access with NAT disabled/blocked but endpoint is created
 - VPN gateway
 - Are DNS resolution and DNS hostnames attributes enabled for a VPC?
 - AWS Storage Gateway
